@@ -529,3 +529,153 @@ test("late fresh sign-in verification cannot replace a newer verified account", 
     "newer-synthetic-token",
   );
 });
+
+/** Require verified access and preserve Laravel's data and pagination envelope. */
+test("rider reads use the verified admin Bearer and encoded search parameters", async () => {
+  const calls = workingApi();
+  const auth = createAdminAuth();
+  const query = new URLSearchParams({
+    q: "a+b@example.test",
+    page: "2",
+    per_page: "50",
+  });
+  await assert.rejects(auth.readRiders(query), { status: 401 });
+  assert.equal(calls.length, 0);
+  await auth.signIn("admin@example.test", "synthetic password");
+  mock.restoreAll();
+
+  const page = {
+    data: [],
+    meta: { current_page: 2, last_page: 2, per_page: 50, total: 0 },
+  };
+  mock.method(
+    globalThis,
+    "fetch",
+    async (input: string | URL | Request, options?: RequestInit) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/api/v1/admin/riders");
+      assert.deepEqual([...url.searchParams], [...query]);
+      assert.equal(options?.method, "GET");
+      assert.equal(options?.credentials, "omit");
+      assert.equal(options?.cache, "no-store");
+      assert.equal(options?.redirect, "error");
+      assert.equal(
+        new Headers(options?.headers).get("Authorization"),
+        "Bearer synthetic-admin-token",
+      );
+      return Response.json(page);
+    },
+  );
+
+  assert.deepEqual(await auth.readRiders(query), page);
+});
+
+/** A current directory denial invalidates the same session that made the request. */
+test("rider read authorization failures end the active admin session", async () => {
+  for (const status of [401, 403]) {
+    workingApi();
+    const auth = createAdminAuth();
+    await auth.signIn("admin@example.test", "synthetic password");
+    mock.restoreAll();
+    /** Simulate the server rejecting the verified token after its permissions changed. */
+    mock.method(globalThis, "fetch", async () => Response.json({}, { status }));
+
+    await assert.rejects(auth.readRiders(new URLSearchParams()), { status });
+    assert.equal(auth.getSnapshot().status, "guest");
+    assert.equal(saved.has(AUTH_STORAGE_KEY), false);
+    mock.restoreAll();
+  }
+});
+
+/** Sign-out and a newer login must make both old successes and old denials irrelevant. */
+test("an old rider read cannot expose rows or clear a newer admin session", async () => {
+  for (const status of [200, 403]) {
+    workingApi();
+    const auth = createAdminAuth();
+    await auth.signIn("admin@example.test", "synthetic password");
+    mock.restoreAll();
+    let finish!: (response: Response) => void;
+    mock.method(globalThis, "fetch", async (input: string | URL | Request) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/login"))
+        return loginResponse("newer-synthetic-admin");
+      if (path.endsWith("/me")) return Response.json({ data: profile(88) });
+      if (path.endsWith("/logout")) return new Response(null, { status: 204 });
+      /** Keep the obsolete directory response in flight across account replacement. */
+      return new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+    });
+
+    const older = assert.rejects(
+      auth.readRiders(new URLSearchParams()),
+      /cancelled/i,
+    );
+    await auth.signOut();
+    await auth.signIn("newer@example.test", "synthetic password");
+    finish(Response.json({ data: [{ id: 7 }] }, { status }));
+    await older;
+    assert.equal(auth.getSnapshot().session?.user.id, 88);
+    assert.equal(
+      JSON.parse(saved.get(AUTH_STORAGE_KEY)!).access_token,
+      "newer-synthetic-admin",
+    );
+    mock.restoreAll();
+  }
+});
+
+/** Ignore a stale search even if its transport resolves after the component cancelled it. */
+test("a cancelled rider read cannot apply a late denial", async () => {
+  workingApi();
+  const auth = createAdminAuth();
+  await auth.signIn("admin@example.test", "synthetic password");
+  mock.restoreAll();
+  let finish!: (response: Response) => void;
+  mock.method(
+    globalThis,
+    "fetch",
+    (_input: string | URL | Request, options?: RequestInit) => {
+      /** Resolve despite cancellation so the store's late-result guard is exercised. */
+      return new Promise<Response>((resolve) => {
+        finish = resolve;
+        assert.ok(options?.signal instanceof AbortSignal);
+      });
+    },
+  );
+  const controller = new AbortController();
+  const read = assert.rejects(
+    auth.readRiders(new URLSearchParams(), controller.signal),
+    /cancelled/i,
+  );
+  controller.abort();
+  finish(Response.json({}, { status: 403 }));
+  await read;
+  assert.equal(auth.getSnapshot().status, "authenticated");
+});
+
+/** Keep directory filters mounted during a recheck, then block access if the check fails. */
+test("a background recheck retains the verified session only while verification is pending", async () => {
+  workingApi();
+  const auth = createAdminAuth();
+  await auth.signIn("admin@example.test", "synthetic password");
+  mock.restoreAll();
+  let finish!: (response: Response) => void;
+  /** Hold a previously verified account's recheck without relying on timers. */
+  mock.method(
+    globalThis,
+    "fetch",
+    () =>
+      new Promise<Response>((resolve) => {
+        finish = resolve;
+      }),
+  );
+
+  const recheck = auth.restore();
+  assert.equal(auth.getSnapshot().status, "authenticated");
+  assert.equal(auth.getSnapshot().session?.user.id, 7);
+  finish(Response.json({}, { status: 503 }));
+  await recheck;
+  assert.equal(auth.getSnapshot().status, "unavailable");
+  assert.equal(auth.getSnapshot().session, null);
+  assert.ok(saved.has(AUTH_STORAGE_KEY));
+});

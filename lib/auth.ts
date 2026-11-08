@@ -54,8 +54,13 @@ export class AuthError extends Error {
 }
 
 /** Narrow untrusted JSON before reading any credential or profile field. */
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** A saved or in-flight credential can be used only before its server expiry. */
+function isUnexpired(expiresAt: string): boolean {
+  return Date.parse(expiresAt) > Date.now();
 }
 
 /** Allow only nonempty opaque credentials with a future expiry, never a claimed stored identity. */
@@ -66,7 +71,7 @@ function parseCredentials(value: unknown): Credentials | null {
     !value.access_token ||
     /\s/.test(value.access_token) ||
     typeof value.expires_at !== "string" ||
-    !(Date.parse(value.expires_at) > Date.now())
+    !isUnexpired(value.expires_at)
   )
     return null;
   return { access_token: value.access_token, expires_at: value.expires_at };
@@ -99,27 +104,42 @@ function saveCredentials(value: Credentials | null): boolean {
   }
 }
 
-/** Keep requests on the existing admin auth endpoints with no cookies, caches or redirects. */
-async function authRequest(
-  action: "login" | "me" | "logout",
-  token?: string,
-  values?: Record<string, string>,
-): Promise<unknown> {
+/** Send fixed admin actions through the same cookie-free Bearer transport. */
+async function adminRequest(
+  action: "login" | "me" | "logout" | "riders",
+  {
+    token,
+    values,
+    params,
+    signal,
+  }: {
+    token?: string;
+    values?: Record<string, string>;
+    params?: URLSearchParams;
+    signal?: AbortSignal;
+  } = {},
+): Promise<Record<string, unknown> | null> {
+  const path = action === "riders" ? "riders" : `auth/${action}`;
+  const query = params?.toString();
   let response: Response;
   try {
-    response = await fetch(`${API_URL}/api/v1/admin/auth/${action}`, {
-      method: action === "me" ? "GET" : "POST",
-      credentials: "omit",
-      cache: "no-store",
-      redirect: "error",
-      signal: AbortSignal.timeout(15_000),
-      headers: {
-        Accept: "application/json",
-        ...(values ? { "Content-Type": "application/json" } : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    const timeout = AbortSignal.timeout(15_000);
+    response = await fetch(
+      `${API_URL}/api/v1/admin/${path}${query ? `?${query}` : ""}`,
+      {
+        method: action === "login" || action === "logout" ? "POST" : "GET",
+        credentials: "omit",
+        cache: "no-store",
+        redirect: "error",
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        headers: {
+          Accept: "application/json",
+          ...(values ? { "Content-Type": "application/json" } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: values ? JSON.stringify(values) : undefined,
       },
-      body: values ? JSON.stringify(values) : undefined,
-    });
+    );
   } catch {
     throw new AuthError(
       "Couldn’t reach Hatid. Check your connection and try again.",
@@ -139,6 +159,7 @@ async function authRequest(
   if (!response.ok) {
     const fields: Record<string, string[]> = {};
     if (
+      action === "login" &&
       response.status === 422 &&
       isRecord(payload) &&
       isRecord(payload.errors)
@@ -163,21 +184,28 @@ async function authRequest(
             : response.status === 429
               ? "Too many attempts. Please wait a moment before trying again."
               : "Hatid is temporarily unavailable. Please try again.";
-    throw new AuthError(message, response.status, fields);
+    throw new AuthError(
+      response.status === 422 && action === "riders"
+        ? "Check the rider search and filters."
+        : message,
+      response.status,
+      fields,
+    );
   }
   if (!isRecord(payload))
     throw new AuthError(
       "Hatid returned an unreadable response. Please try again.",
       0,
     );
-  return payload.data;
+  return payload;
 }
 
 /** A real /admin/auth/me response, not login JSON or browser storage, establishes the current role. */
 async function verifySession(candidate: Credentials): Promise<AdminSession> {
-  if (!(Date.parse(candidate.expires_at) > Date.now()))
+  if (!isUnexpired(candidate.expires_at))
     throw new AuthError("Your session has expired. Please sign in again.", 401);
-  const user = await authRequest("me", candidate.access_token);
+  const user = (await adminRequest("me", { token: candidate.access_token }))
+    ?.data;
   if (isRecord(user) && typeof user.role === "string" && user.role !== "admin")
     throw new AuthError(
       "This account does not have administrator access.",
@@ -197,7 +225,7 @@ async function verifySession(candidate: Credentials): Promise<AdminSession> {
       "Hatid returned an unreadable profile. Please try again.",
       0,
     );
-  if (!(Date.parse(candidate.expires_at) > Date.now()))
+  if (!isUnexpired(candidate.expires_at))
     throw new AuthError("Your session has expired. Please sign in again.", 401);
   return {
     ...candidate,
@@ -272,7 +300,12 @@ export function createAdminAuth() {
       }
     }
     const candidate = credentials;
-    publish({ status: "checking", session: null, notice: "" });
+    if (
+      state.session?.access_token !== candidate.access_token ||
+      !isUnexpired(candidate.expires_at)
+    ) {
+      publish({ status: "checking", session: null, notice: "" });
+    }
     try {
       const session = await verifySession(candidate);
       if (attempt !== generation) return;
@@ -291,11 +324,14 @@ export function createAdminAuth() {
   /** Verify newly issued admin credentials before storing anything or publishing authenticated state. */
   async function signIn(email: string, password: string) {
     const attempt = ++generation;
-    const data = await authRequest("login", undefined, {
-      email: email.trim().toLowerCase(),
-      password,
-      device_name: "Hatid admin browser",
+    const response = await adminRequest("login", {
+      values: {
+        email: email.trim().toLowerCase(),
+        password,
+        device_name: "Hatid admin browser",
+      },
     });
+    const data = response?.data;
     if (attempt !== generation)
       throw new AuthError("This sign-in was cancelled. Please try again.", 0);
     const candidate = parseCredentials(data);
@@ -330,7 +366,7 @@ export function createAdminAuth() {
     const attempt = generation;
     if (!token) return;
     try {
-      await authRequest("logout", token);
+      await adminRequest("logout", { token });
     } catch (error) {
       if (attempt !== generation) return;
       if (!(error instanceof AuthError && error.status === 401)) {
@@ -341,6 +377,44 @@ export function createAdminAuth() {
         });
       }
     }
+  }
+
+  /** Keep directory results and denials tied to the verified token that requested them. */
+  async function readRiders(params: URLSearchParams, signal?: AbortSignal) {
+    const session = state.session;
+    if (!session) throw new AuthError("Sign in to view riders.", 401);
+    const { access_token: token, expires_at: expiresAt } = session;
+
+    /** Prevent a cancelled read or a replaced account from using this response. */
+    function requireCurrentSession() {
+      if (signal?.aborted || state.session?.access_token !== token) {
+        throw new AuthError("This rider read was cancelled.", 0);
+      }
+      if (!isUnexpired(expiresAt)) {
+        const error = new AuthError(
+          "Your session has expired. Please sign in again.",
+          401,
+        );
+        clear(error.message);
+        throw error;
+      }
+    }
+
+    requireCurrentSession();
+    let response: Record<string, unknown> | null;
+    try {
+      response = await adminRequest("riders", { token, params, signal });
+    } catch (error) {
+      requireCurrentSession();
+      if (
+        error instanceof AuthError &&
+        (error.status === 401 || error.status === 403)
+      )
+        clear(error.message);
+      throw error;
+    }
+    requireCurrentSession();
+    return response;
   }
 
   return {
@@ -363,5 +437,6 @@ export function createAdminAuth() {
     restore,
     signIn,
     signOut,
+    readRiders,
   };
 }

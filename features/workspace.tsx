@@ -2,21 +2,29 @@
 
 import Link from "next/link";
 import { useEffect, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
-import { Brand, Button, Icon } from "@/components/ui";
+import { usePathname, useRouter } from "next/navigation";
+import { Brand, Button, displayDate, Icon } from "@/components/ui";
 import { SessionCheck, useAdminAuth } from "@/features/auth";
 
 /** Reuse the same real destinations in the desktop sidebar and compact mobile navigation. */
-function AdminNavigation() {
+function AdminNavigation({ current }: { current: "Overview" | "Riders" }) {
   return (
     <>
       <Link
         href="/dashboard"
-        className="nav-link active"
-        aria-current="page"
+        className={current === "Overview" ? "nav-link active" : "nav-link"}
+        aria-current={current === "Overview" ? "page" : undefined}
         prefetch={false}
       >
         <Icon name="overview" /> Overview
+      </Link>
+      <Link
+        href="/riders"
+        className={current === "Riders" ? "nav-link active" : "nav-link"}
+        aria-current={current === "Riders" ? "page" : undefined}
+        prefetch={false}
+      >
+        <Icon name="riders" /> Riders
       </Link>
       <Link href="/dashboard#account" className="nav-link" prefetch={false}>
         <Icon name="account" /> My account
@@ -29,6 +37,7 @@ function AdminNavigation() {
 export function AdminWorkspace({ children }: { children: ReactNode }) {
   const auth = useAdminAuth();
   const router = useRouter();
+  const current = usePathname() === "/riders" ? "Riders" : "Overview";
 
   /** Redirect only a confirmed guest, never a pending or unavailable verification. */
   useEffect(() => {
@@ -46,7 +55,7 @@ export function AdminWorkspace({ children }: { children: ReactNode }) {
         <Brand />
         <div className="sidebar-heading">WORKSPACE</div>
         <nav aria-label="Main navigation">
-          <AdminNavigation />
+          <AdminNavigation current={current} />
         </nav>
         <div className="sidebar-bottom">
           <span className="sidebar-shield">
@@ -66,7 +75,7 @@ export function AdminWorkspace({ children }: { children: ReactNode }) {
       <div className="workspace-body">
         <header className="workspace-header">
           <span className="breadcrumb">
-            Workspace <span>/</span> <strong>Overview</strong>
+            Workspace <span>/</span> <strong>{current}</strong>
           </span>
           <div className="header-actions">
             <span className="admin-avatar" aria-hidden="true">
@@ -83,7 +92,7 @@ export function AdminWorkspace({ children }: { children: ReactNode }) {
           </div>
         </header>
         <nav className="mobile-nav" aria-label="Mobile navigation">
-          <AdminNavigation />
+          <AdminNavigation current={current} />
         </nav>
         <main id="main-content" className="workspace-content">
           {auth.notice && (
@@ -100,18 +109,6 @@ export function AdminWorkspace({ children }: { children: ReactNode }) {
       </div>
     </div>
   );
-}
-
-/** Format actual server/session timestamps for Philippine readers without crashing on a missing date. */
-function displayDate(value: string) {
-  const date = new Date(value);
-  return Number.isFinite(date.getTime())
-    ? new Intl.DateTimeFormat("en-PH", {
-        dateStyle: "medium",
-        timeStyle: "short",
-        timeZone: "Asia/Manila",
-      }).format(date)
-    : "Unavailable";
 }
 
 /** Display only the verified account/session; rider statistics require their separate authorized API feature. */

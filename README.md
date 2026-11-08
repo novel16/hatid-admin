@@ -43,6 +43,12 @@ Four new cohesive application modules:
 
 Thin Next files own `/`, `/login`, the workspace layout and `/dashboard`; root layout mounts one provider. `app/globals.css` reuses Hatid forest/mint colors with system fonts, avoiding a build-time font download. The existing Hatid SVG is reused as a public asset. `lib/auth.test.ts` is supporting test code; package/TypeScript/example-env/rules are configuration/docs, not additional business layers. No API source or database schema is required.
 
+## Rider Directory
+
+The protected **Riders** page reads `GET /api/v1/admin/riders`. Search with Enter or Search, filter by vehicle, and select 10, 50 or 100 entries. A profile dialog displays the selected result. The page and result range come from Laravel's paginated response.
+
+For this feature, read `features/riders.tsx` for the request and screen states, then `components/pagination.tsx` and the shared Modal in `components/ui.tsx`. The existing `lib/auth.ts` session owner verifies the token and cancels stale reads. Focus rechecks keep a verified session visible while the API responds. A failed verification takes the user to the existing retry or sign-in view.
+
 ## Verification
 
 ```bash

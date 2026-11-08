@@ -16,7 +16,7 @@ import { Brand, Button, Icon } from "@/components/ui";
 
 type AuthActions = Pick<
   ReturnType<typeof createAdminAuth>,
-  "restore" | "signIn" | "signOut"
+  "restore" | "signIn" | "signOut" | "readRiders"
 >;
 const AuthContext = createContext<(AuthState & AuthActions) | null>(null);
 
@@ -75,6 +75,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
         restore: auth.restore,
         signIn: auth.signIn,
         signOut: auth.signOut,
+        readRiders: auth.readRiders,
       }}
     >
       {children}

@@ -8,6 +8,12 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
+## Current Rider Directory
+
+- The approved read-only Riders page uses real admin API results and the existing Bearer session owner. Use search, vehicle filtering and reusable 10/50/100 pagination with entries left and search right.
+- Show approved profile fields from the current page in the shared native Modal. Treat loading, empty and failed reads separately. Cancel obsolete requests and discard results when the active token changes.
+- Account status changes and aggregate counts are separate stages. Preserve user servers and verify sequentially. Publish this feature to the existing admin main under the established preference.
+
 ## Current admin foundation — 6 November
 
 - User approved actual admin login + layout first, separate from rider management/counts/suspension. Reuse existing /api/v1/admin/auth/login, /me, /logout with server-enforced admin role/ability and cookie-free Bearer tokens.
