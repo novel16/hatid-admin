@@ -8,6 +8,13 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
+## Current admin foundation — 6 November
+
+- User approved actual admin login + layout first, separate from rider management/counts/suspension. Reuse existing /api/v1/admin/auth/login, /me, /logout with server-enforced admin role/ability and cookie-free Bearer tokens.
+- Store only token/expiry in API-specific admin sessionStorage; verify /me before login/refresh access. Never trust a stored user/role, mix rider credentials or add public admin registration/demo access. Preserve retry on connection failure and discard late auth responses.
+- No native account/credential fixture, migration/seed, rider source or business-data access. Interactive API app:create-admin stays user-run; do not invent or publish a default password.
+- Keep3012 and existing main feature commit/push preference. Restore the copied app's existing locked native dependencies only; no package upgrade/new runtime dependency. Preserve user3011/8000 servers. Production build/extra server requires safe resources, with checks sequential on8GB.
+
 ## Local runtime
 
 - Active application path: C:/Users/Novel/Desktop/laravel projects/hatid/admin. Use native Windows Node24 from this copy. The previous WSL copy is no longer the active source. The copied node_modules contains Linux binaries and needs a Windows install from package-lock.json before app startup; no Windows Next launcher/bindings were present during the3 November review.
