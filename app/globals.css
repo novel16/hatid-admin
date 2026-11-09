@@ -1193,15 +1193,12 @@ svg {
 .admin-modal::backdrop {
   background: rgb(14 30 24 / 52%);
 }
-.admin-modal-header,
-.admin-modal-footer {
+.admin-modal-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 14px;
   padding: 20px 22px;
-}
-.admin-modal-header {
   border-bottom: 1px solid var(--line);
 }
 .admin-modal-header h2 {
@@ -1215,10 +1212,6 @@ svg {
 }
 .modal-close {
   padding: 10px;
-}
-.admin-modal-footer {
-  justify-content: flex-end;
-  border-top: 1px solid var(--line);
 }
 @media (max-width: 1100px) {
   .riders-table .rider-date-column {
@@ -1271,5 +1264,113 @@ svg {
   }
   .mobile-page-label {
     display: inline;
+  }
+}
+
+/* Rider account status and profile activity */
+.button-danger {
+  background: var(--red);
+  color: var(--white);
+}
+.button-danger:hover:not(:disabled) {
+  background: #922b2b;
+}
+.rider-status-suspended {
+  color: var(--red);
+  background: #fff0ec;
+}
+.riders-filters {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+.riders-filters > .button {
+  margin-left: auto;
+}
+.rider-status-panel,
+.rider-status-history {
+  border-top: 1px solid var(--line);
+  padding: 18px 22px;
+}
+.rider-status-panel > p:not(.notice),
+.rider-status-history > p,
+.status-confirmation > p {
+  color: var(--muted);
+}
+.status-read-error,
+.status-confirmation {
+  display: grid;
+  gap: 12px;
+}
+.status-read-error > .button {
+  justify-self: start;
+}
+.status-confirmation h3,
+.rider-status-history h3 {
+  font-size: 15px;
+  font-weight: 650;
+}
+.status-confirmation textarea {
+  width: 100%;
+  min-height: 92px;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--white);
+  font: inherit;
+}
+.status-confirmation textarea:focus-visible {
+  outline: 3px solid #73bb9f;
+  outline-offset: 2px;
+}
+.status-confirmation-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.rider-status-history ul {
+  margin-top: 10px;
+}
+.rider-status-history li {
+  display: grid;
+  gap: 4px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.rider-status-history li > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.rider-status-history li > p {
+  white-space: pre-wrap;
+}
+.rider-status-history > p {
+  margin-top: 8px;
+}
+.list-pagination-compact {
+  padding: 12px 0 0;
+}
+.list-pagination-compact .list-page-controls {
+  width: 100%;
+  justify-content: space-between;
+}
+.list-pagination-compact .mobile-page-label {
+  display: inline;
+}
+@media (max-width: 950px) {
+  .riders-table .rider-phone-column {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  .riders-table .rider-vehicle-column {
+    display: none;
+  }
+  .rider-status-panel,
+  .rider-status-history {
+    padding: 15px 17px;
   }
 }

@@ -8,6 +8,12 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
+## Current rider status and activity
+
+- The user approved Suspend and Reactivate in the existing profile dialog. Require reason and confirmation and load the current server revision before enabling an action.
+- Refresh current profile and directory results after a confirmed change or an uncertain response. An obsolete revision requires a fresh read and new confirmation. Reuse fixed ten-row compact pagination for history.
+- Keep checks sequential and preserve active user servers. Publish the reviewed feature to existing admin main.
+
 ## Current Rider Directory
 
 - The approved read-only Riders page uses real admin API results and the existing Bearer session owner. Use search, vehicle filtering and reusable 10/50/100 pagination with entries left and search right.

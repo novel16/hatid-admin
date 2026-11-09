@@ -6,6 +6,7 @@ import {
   createAdminAuth,
   parseStoredSession,
 } from "./auth.ts";
+import { readActivity, readStatusResult } from "./riders.ts";
 
 const originalStorage = Object.getOwnPropertyDescriptor(
   globalThis,
@@ -678,4 +679,96 @@ test("a background recheck retains the verified session only while verification 
   assert.equal(auth.getSnapshot().status, "unavailable");
   assert.equal(auth.getSnapshot().session, null);
   assert.ok(saved.has(AUTH_STORAGE_KEY));
+});
+
+/** The status action uses the reviewed revision and the current administrator's Bearer. */
+test("confirmed rider status changes use one protected PATCH with the reviewed revision", async () => {
+  const calls = workingApi();
+  const auth = createAdminAuth();
+  const change = {
+    status: "suspended" as const,
+    reason: "Account review.",
+    expected_revision: 4,
+  };
+  await assert.rejects(auth.updateRiderStatus(12, change), { status: 401 });
+  assert.equal(calls.length, 0);
+  await auth.signIn("admin@example.test", "synthetic password");
+  mock.restoreAll();
+
+  const result = { data: { id: 12, status: "suspended", status_revision: 5 } };
+  /** Observe the native request without writing to a development account. */
+  mock.method(
+    globalThis,
+    "fetch",
+    async (input: string | URL | Request, options?: RequestInit) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/api/v1/admin/riders/12/status");
+      assert.equal(url.search, "");
+      assert.equal(options?.method, "PATCH");
+      assert.equal(options?.credentials, "omit");
+      assert.equal(options?.cache, "no-store");
+      assert.equal(
+        new Headers(options?.headers).get("Authorization"),
+        "Bearer synthetic-admin-token",
+      );
+      assert.deepEqual(JSON.parse(String(options?.body)), change);
+      return Response.json(result);
+    },
+  );
+
+  assert.deepEqual(await auth.updateRiderStatus(12, change), result);
+});
+
+/** Supply the allowlisted profile fields used by history and status responses. */
+function activeRider() {
+  return {
+    id: 12,
+    name: "Test rider",
+    email: "rider@example.test",
+    phone: null,
+    vehicle: "bicycle",
+    created_at: "2026-01-01T00:00:00Z",
+    status: "active",
+    status_revision: 4,
+    suspended_at: null,
+  };
+}
+
+/** An activity page must belong to the open rider before it can enable a status action. */
+test("profile activity requires the requested rider and fixed history page", () => {
+  const envelope = {
+    rider: activeRider(),
+    data: [],
+    meta: { current_page: 1, last_page: 1, per_page: 10, total: 0 },
+  };
+  assert.equal(readActivity(envelope, 12, 1).rider.status_revision, 4);
+  assert.throws(() => readActivity(envelope, 13, 1), AuthError);
+  assert.throws(() => readActivity(envelope, 12, 2), AuthError);
+});
+
+/** A malformed or unrelated success reply must lead to verification, not a success message. */
+test("status confirmation requires the selected rider, requested status and next revision", () => {
+  const update = {
+    status: "suspended" as const,
+    reason: "Account review.",
+    expected_revision: 4,
+  };
+  const suspended = {
+    ...activeRider(),
+    status: "suspended",
+    status_revision: 5,
+    suspended_at: "2026-11-08T00:00:00Z",
+  };
+  assert.equal(
+    readStatusResult({ data: suspended }, 12, update).status,
+    "suspended",
+  );
+  for (const data of [
+    activeRider(),
+    { ...suspended, id: 13 },
+    { ...suspended, status_revision: 7 },
+    { ...suspended, suspended_at: null },
+  ]) {
+    assert.throws(() => readStatusResult({ data }, 12, update), { status: 0 });
+  }
 });

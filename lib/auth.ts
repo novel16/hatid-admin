@@ -21,6 +21,22 @@ export interface AuthState {
   notice: string;
 }
 
+export type RiderStatus = "active" | "suspended";
+export type RiderStatusUpdate = {
+  status: RiderStatus;
+  reason: string;
+  expected_revision: number;
+};
+
+type RiderEndpoint =
+  "riders" | `riders/${number}/activity` | `riders/${number}/status`;
+type AdminRequestOptions = {
+  token?: string;
+  values?: Record<string, string | number>;
+  params?: URLSearchParams;
+  signal?: AbortSignal;
+};
+
 const API_URL = (
   process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000"
 ).replace(/\/+$/, "");
@@ -106,20 +122,15 @@ function saveCredentials(value: Credentials | null): boolean {
 
 /** Send fixed admin actions through the same cookie-free Bearer transport. */
 async function adminRequest(
-  action: "login" | "me" | "logout" | "riders",
-  {
-    token,
-    values,
-    params,
-    signal,
-  }: {
-    token?: string;
-    values?: Record<string, string>;
-    params?: URLSearchParams;
-    signal?: AbortSignal;
-  } = {},
+  action: "login" | "me" | "logout" | RiderEndpoint,
+  { token, values, params, signal }: AdminRequestOptions = {},
 ): Promise<Record<string, unknown> | null> {
-  const path = action === "riders" ? "riders" : `auth/${action}`;
+  const authAction =
+    action === "login" || action === "me" || action === "logout";
+  const path = authAction ? `auth/${action}` : action;
+  let method = "GET";
+  if (action === "login" || action === "logout") method = "POST";
+  if (action.endsWith("/status")) method = "PATCH";
   const query = params?.toString();
   let response: Response;
   try {
@@ -127,7 +138,7 @@ async function adminRequest(
     response = await fetch(
       `${API_URL}/api/v1/admin/${path}${query ? `?${query}` : ""}`,
       {
-        method: action === "login" || action === "logout" ? "POST" : "GET",
+        method,
         credentials: "omit",
         cache: "no-store",
         redirect: "error",
@@ -174,20 +185,19 @@ async function adminRequest(
         }
       }
     }
-    const message =
-      response.status === 401
-        ? "Your session has ended. Please sign in again."
-        : response.status === 403
-          ? "This account does not have administrator access."
-          : response.status === 422
-            ? "Check your email and password."
-            : response.status === 429
-              ? "Too many attempts. Please wait a moment before trying again."
-              : "Hatid is temporarily unavailable. Please try again.";
+    const messages: Record<number, string> = {
+      401: "Your session has ended. Please sign in again.",
+      403: "This account does not have administrator access.",
+      404: "The requested record is unavailable.",
+      409: "The rider status has changed. Review the current profile.",
+      422: authAction
+        ? "Check your email and password."
+        : "Check the submitted rider details.",
+      429: "Too many attempts. Please wait a moment before trying again.",
+    };
     throw new AuthError(
-      response.status === 422 && action === "riders"
-        ? "Check the rider search and filters."
-        : message,
+      messages[response.status] ??
+        "Hatid is temporarily unavailable. Please try again.",
       response.status,
       fields,
     );
@@ -379,16 +389,19 @@ export function createAdminAuth() {
     }
   }
 
-  /** Keep directory results and denials tied to the verified token that requested them. */
-  async function readRiders(params: URLSearchParams, signal?: AbortSignal) {
+  /** Tie each rider request and response to the same verified admin session. */
+  async function riderRequest(
+    action: RiderEndpoint,
+    request: Omit<AdminRequestOptions, "token">,
+  ) {
     const session = state.session;
     if (!session) throw new AuthError("Sign in to view riders.", 401);
     const { access_token: token, expires_at: expiresAt } = session;
 
     /** Prevent a cancelled read or a replaced account from using this response. */
     function requireCurrentSession() {
-      if (signal?.aborted || state.session?.access_token !== token) {
-        throw new AuthError("This rider read was cancelled.", 0);
+      if (request.signal?.aborted || state.session?.access_token !== token) {
+        throw new AuthError("This rider request was cancelled.", 0);
       }
       if (!isUnexpired(expiresAt)) {
         const error = new AuthError(
@@ -403,7 +416,7 @@ export function createAdminAuth() {
     requireCurrentSession();
     let response: Record<string, unknown> | null;
     try {
-      response = await adminRequest("riders", { token, params, signal });
+      response = await adminRequest(action, { ...request, token });
     } catch (error) {
       requireCurrentSession();
       if (
@@ -415,6 +428,28 @@ export function createAdminAuth() {
     }
     requireCurrentSession();
     return response;
+  }
+
+  /** Load one directory page with the applied search and filters. */
+  function readRiders(params: URLSearchParams, signal?: AbortSignal) {
+    return riderRequest("riders", { params, signal });
+  }
+
+  /** Read the selected rider's current profile and one history page. */
+  function readRiderActivity(id: number, page: number, signal?: AbortSignal) {
+    return riderRequest(`riders/${id}/activity`, {
+      params: new URLSearchParams({ page: String(page) }),
+      signal,
+    });
+  }
+
+  /** Send the confirmed transition with its reviewed revision. */
+  function updateRiderStatus(
+    id: number,
+    values: RiderStatusUpdate,
+    signal?: AbortSignal,
+  ) {
+    return riderRequest(`riders/${id}/status`, { values, signal });
   }
 
   return {
@@ -438,5 +473,7 @@ export function createAdminAuth() {
     signIn,
     signOut,
     readRiders,
+    readRiderActivity,
+    updateRiderStatus,
   };
 }

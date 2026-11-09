@@ -74,6 +74,7 @@ export function Pagination({
   total,
   shown,
   pending,
+  compact = false,
   onPageChange,
 }: {
   page: number;
@@ -81,6 +82,7 @@ export function Pagination({
   total: number | null;
   shown: number;
   pending: boolean;
+  compact?: boolean;
   onPageChange: (page: number) => void;
 }) {
   const lastPage = Math.max(1, Math.ceil((total ?? 0) / perPage));
@@ -97,17 +99,21 @@ export function Pagination({
 
   return (
     <nav
-      className="list-pagination"
+      className={
+        compact ? "list-pagination list-pagination-compact" : "list-pagination"
+      }
       aria-label="List pagination"
       aria-busy={pending}
     >
-      <p role="status">
-        {pending
-          ? "Updating results…"
-          : total === null
-            ? ""
-            : `Showing ${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}`}
-      </p>
+      {!compact && (
+        <p role="status">
+          {pending
+            ? "Updating results…"
+            : total === null
+              ? ""
+              : `Showing ${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}`}
+        </p>
+      )}
       <div className="list-page-controls">
         <Button
           variant="secondary"
@@ -121,31 +127,33 @@ export function Pagination({
           <Icon name="previous" size={15} />
           <span className="mobile-page-label">Prev</span>
         </Button>
-        <div className="list-page-numbers">
-          {pageNumbers(current, lastPage).map(
-            /** Expose direct page buttons and passive gaps on wider screens. */
-            (value) =>
-              typeof value === "number" ? (
-                <Button
-                  key={value}
-                  variant="secondary"
-                  aria-label={`Page ${value}`}
-                  aria-current={value === current ? "page" : undefined}
-                  aria-disabled={blocked}
-                  onClick={
-                    /** Open the selected server page. */
-                    () => change(value)
-                  }
-                >
-                  {value}
-                </Button>
-              ) : (
-                <span key={value} aria-hidden="true">
-                  …
-                </span>
-              ),
-          )}
-        </div>
+        {!compact && (
+          <div className="list-page-numbers">
+            {pageNumbers(current, lastPage).map(
+              /** Expose direct page buttons and passive gaps on wider screens. */
+              (value) =>
+                typeof value === "number" ? (
+                  <Button
+                    key={value}
+                    variant="secondary"
+                    aria-label={`Page ${value}`}
+                    aria-current={value === current ? "page" : undefined}
+                    aria-disabled={blocked}
+                    onClick={
+                      /** Open the selected server page. */
+                      () => change(value)
+                    }
+                  >
+                    {value}
+                  </Button>
+                ) : (
+                  <span key={value} aria-hidden="true">
+                    …
+                  </span>
+                ),
+            )}
+          </div>
+        )}
         <span className="mobile-page-label">
           Page {current} of {lastPage}
         </span>

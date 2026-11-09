@@ -74,7 +74,7 @@ export function Button({
   type = "button",
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "secondary";
+  variant?: "primary" | "secondary" | "danger";
 }) {
   return (
     <button
@@ -104,11 +104,13 @@ export function Modal({
   description,
   children,
   onClose,
+  closeDisabled = false,
 }: {
   title: string;
   description?: string;
   children: ReactNode;
   onClose: () => void;
+  closeDisabled?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -124,6 +126,13 @@ export function Modal({
     };
   }, []);
 
+  /** Close the native dialog before unmounting so it can restore focus. */
+  function dismiss() {
+    if (closeDisabled) return;
+    ref.current?.close();
+    onClose();
+  }
+
   return (
     <dialog
       ref={ref}
@@ -134,13 +143,13 @@ export function Modal({
         /** Escape closes the same mounted dialog as its visible button. */
         (event) => {
           event.preventDefault();
-          onClose();
+          dismiss();
         }
       }
       onClick={
         /** Only a click on the dialog's own backdrop dismisses it. */
         (event) => {
-          if (event.target === event.currentTarget) onClose();
+          if (event.target === event.currentTarget) dismiss();
         }
       }
     >
@@ -153,7 +162,8 @@ export function Modal({
           <Button
             variant="secondary"
             className="modal-close"
-            onClick={onClose}
+            onClick={dismiss}
+            disabled={closeDisabled}
             aria-label="Close dialog"
           >
             <Icon name="close" size={18} />

@@ -6,48 +6,39 @@ import {
   Pagination,
   type PageSize,
 } from "@/components/pagination";
-import { Button, displayDate, Icon, Modal } from "@/components/ui";
+import { Button, displayDate, Icon } from "@/components/ui";
 import { useAdminAuth } from "@/features/auth";
-import { AuthError, isRecord } from "@/lib/auth";
-
-const VEHICLE_LABELS = {
-  motorcycle: "Motorcycle",
-  bicycle: "Bicycle",
-  car: "Car",
-  unset: "Not set",
-} as const;
+import { RiderProfile, RiderStatusBadge } from "@/features/rider-profile";
+import { AuthError, type RiderStatus } from "@/lib/auth";
+import {
+  isRider,
+  readPage,
+  STATUS_LABELS,
+  VEHICLE_LABELS,
+  vehicleLabel,
+  type Rider,
+  type RiderPage,
+} from "@/lib/riders";
 
 type VehicleFilter = "" | keyof typeof VEHICLE_LABELS;
-
-interface Rider {
-  id: number;
-  name: string;
-  email: string;
-  phone: string | null;
-  vehicle: string | null;
-  created_at: string | null;
-}
 
 interface RiderQuery {
   page: number;
   perPage: PageSize;
   search: string;
   vehicle: VehicleFilter;
-}
-
-interface RiderPage {
-  rows: Rider[];
-  total: number;
-  lastPage: number;
+  status: "" | RiderStatus;
 }
 
 type RiderResult =
-  { query: RiderQuery; page: RiderPage } | { query: RiderQuery; error: string };
+  | { query: RiderQuery; page: RiderPage<Rider> }
+  | { query: RiderQuery; error: string };
 const INITIAL_QUERY: RiderQuery = {
   page: 1,
   perPage: 10,
   search: "",
   vehicle: "",
+  status: "",
 };
 
 /** Send only directory filters and paging to the protected API. */
@@ -58,115 +49,8 @@ function riderParams(query: RiderQuery) {
   });
   if (query.search) params.set("q", query.search);
   if (query.vehicle) params.set("vehicle", query.vehicle);
+  if (query.status) params.set("status", query.status);
   return params;
-}
-
-/** Validate profile fields before they become table or dialog content. */
-function isRider(value: unknown): value is Rider {
-  return (
-    isRecord(value) &&
-    typeof value.id === "number" &&
-    Number.isSafeInteger(value.id) &&
-    value.id > 0 &&
-    typeof value.name === "string" &&
-    typeof value.email === "string" &&
-    (value.phone === null || typeof value.phone === "string") &&
-    (value.vehicle === null || typeof value.vehicle === "string") &&
-    (value.created_at === null || typeof value.created_at === "string")
-  );
-}
-
-/** Accept only the requested server page so a malformed reply cannot show stale counts or rows. */
-function readPage(payload: unknown, query: RiderQuery): RiderPage {
-  if (
-    !isRecord(payload) ||
-    !Array.isArray(payload.data) ||
-    !payload.data.every(isRider) ||
-    !isRecord(payload.meta)
-  ) {
-    throw new AuthError(
-      "Hatid returned an unreadable rider list. Try again.",
-      0,
-    );
-  }
-  const {
-    current_page: currentPage,
-    per_page: perPage,
-    last_page: lastPage,
-    total,
-  } = payload.meta;
-  if (
-    currentPage !== query.page ||
-    perPage !== query.perPage ||
-    typeof total !== "number" ||
-    !Number.isSafeInteger(total) ||
-    total < 0 ||
-    lastPage !== Math.max(1, Math.ceil(total / query.perPage)) ||
-    payload.data.length > query.perPage
-  ) {
-    throw new AuthError(
-      "Hatid returned an unreadable rider page. Try again.",
-      0,
-    );
-  }
-  return { rows: payload.data, total, lastPage };
-}
-
-/** Preserve the distinction between a missing vehicle and a legacy vehicle value. */
-function vehicleLabel(vehicle: string | null) {
-  if (!vehicle) return VEHICLE_LABELS.unset;
-  return Object.hasOwn(VEHICLE_LABELS, vehicle)
-    ? VEHICLE_LABELS[vehicle as keyof typeof VEHICLE_LABELS]
-    : "Other";
-}
-
-/** Show the same current profile returned in the directory using the shared native dialog. */
-function RiderProfile({
-  rider,
-  onClose,
-}: {
-  rider: Rider;
-  onClose: () => void;
-}) {
-  return (
-    <Modal
-      title={rider.name}
-      description="Registered rider profile"
-      onClose={onClose}
-    >
-      <dl className="profile-list rider-profile">
-        <div>
-          <dt>Full name</dt>
-          <dd>{rider.name}</dd>
-        </div>
-        <div>
-          <dt>Email address</dt>
-          <dd>{rider.email}</dd>
-        </div>
-        <div>
-          <dt>Phone number</dt>
-          <dd>{rider.phone || "Not provided"}</dd>
-        </div>
-        <div>
-          <dt>Vehicle</dt>
-          <dd>
-            <span className="pill pill-small">
-              {vehicleLabel(rider.vehicle)}
-            </span>
-          </dd>
-        </div>
-        <div>
-          <dt>Date joined</dt>
-          <dd>{displayDate(rider.created_at, false)}</dd>
-        </div>
-      </dl>
-      <div className="admin-modal-footer">
-        <Button variant="secondary" onClick={onClose}>
-          Done
-        </Button>
-      </div>
-    </Modal>
-  );
 }
 
 /** Load and display the authorized server page with independent search, error and profile states. */
@@ -190,7 +74,7 @@ export function RidersScreen() {
       try {
         const payload = await readRiders(riderParams(query), controller.signal);
         if (controller.signal.aborted) return;
-        const response = readPage(payload, query);
+        const response = readPage(payload, query.page, query.perPage, isRider);
         if (query.page > response.lastPage) {
           setQuery(
             /** Keep a more recent search or filter selection in charge. */
@@ -232,10 +116,10 @@ export function RidersScreen() {
     changeQuery({ search: draft.trim() });
   }
 
-  /** Clear the query and vehicle filter while retaining the chosen entry size. */
+  /** Clear search and both filters while retaining the chosen entry size. */
   function clearFilters() {
     setDraft("");
-    changeQuery({ search: "", vehicle: "" });
+    changeQuery({ search: "", vehicle: "", status: "" });
   }
 
   /** Retry the current controls without reviving their previous result. */
@@ -246,6 +130,15 @@ export function RidersScreen() {
   /** Return focus to the list through the native dialog close behavior. */
   function closeProfile() {
     setSelected(null);
+  }
+
+  /** Reload the filtered list after a status action while leaving its profile open. */
+  function refreshDirectory(updated?: Rider) {
+    if (updated) setSelected(updated);
+    setQuery(
+      /** Preserve the active filters while refreshing membership and totals. */
+      (previous) => ({ ...previous }),
+    );
   }
 
   return (
@@ -282,7 +175,24 @@ export function RidersScreen() {
               )}
             </select>
           </label>
-          {(query.search || query.vehicle || draft) && (
+          <label className="rider-vehicle-filter">
+            Status
+            <select
+              value={query.status}
+              onChange={
+                /** Start at the first page of the selected account status. */
+                (event) =>
+                  changeQuery({
+                    status: event.currentTarget.value as RiderQuery["status"],
+                  })
+              }
+            >
+              <option value="">All statuses</option>
+              <option value="active">{STATUS_LABELS.active}</option>
+              <option value="suspended">{STATUS_LABELS.suspended}</option>
+            </select>
+          </label>
+          {(query.search || query.vehicle || query.status || draft) && (
             <Button variant="secondary" onClick={clearFilters}>
               Clear filters
             </Button>
@@ -337,8 +247,8 @@ export function RidersScreen() {
             </span>
             <h2>No riders found</h2>
             <p>
-              {query.search || query.vehicle
-                ? "Try a different search or vehicle filter."
+              {query.search || query.vehicle || query.status
+                ? "Try a different search or filter."
                 : "Riders appear here after they register."}
             </p>
           </div>
@@ -351,10 +261,13 @@ export function RidersScreen() {
                 <th scope="col" className="rider-phone-column">
                   Phone
                 </th>
-                <th scope="col">Vehicle</th>
+                <th scope="col" className="rider-vehicle-column">
+                  Vehicle
+                </th>
                 <th scope="col" className="rider-date-column">
                   Date joined
                 </th>
+                <th scope="col">Status</th>
                 <th scope="col">Profile</th>
               </tr>
             </thead>
@@ -375,7 +288,7 @@ export function RidersScreen() {
                       </div>
                     </td>
                     <td className="rider-phone-column">{rider.phone || "—"}</td>
-                    <td>
+                    <td className="rider-vehicle-column">
                       <span className="pill pill-small">
                         {vehicleLabel(rider.vehicle)}
                       </span>
@@ -384,12 +297,15 @@ export function RidersScreen() {
                       {displayDate(rider.created_at, false)}
                     </td>
                     <td>
+                      <RiderStatusBadge status={rider.status} />
+                    </td>
+                    <td>
                       <Button
                         variant="secondary"
                         className="rider-profile-button"
                         aria-label={`View profile for ${rider.name}`}
                         onClick={
-                          /** Reuse the selected row so opening its profile makes no extra request. */
+                          /** Open this rider and load their current status and activity. */
                           () => setSelected(rider)
                         }
                       >
@@ -422,7 +338,14 @@ export function RidersScreen() {
           />
         )}
       </section>
-      {selected && <RiderProfile rider={selected} onClose={closeProfile} />}
+      {selected && (
+        <RiderProfile
+          key={selected.id}
+          rider={selected}
+          onClose={closeProfile}
+          onRefresh={refreshDirectory}
+        />
+      )}
     </>
   );
 }

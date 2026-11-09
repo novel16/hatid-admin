@@ -1,6 +1,6 @@
 # Hatid Admin
 
-The separate Hatid administrator client runs at **http://localhost:3012**. This first feature provides actual admin sign-in, verified refresh restoration, logout and a responsive account/session overview. Rider management and aggregate business dashboards are separate stages; no sample counts or public admin registration are included.
+The separate Hatid administrator client runs at **http://localhost:3012**. It provides admin sign-in, verified refresh restoration, logout, a responsive account overview and rider management.
 
 ## Run locally
 
@@ -45,9 +45,15 @@ Thin Next files own `/`, `/login`, the workspace layout and `/dashboard`; root l
 
 ## Rider Directory
 
-The protected **Riders** page reads `GET /api/v1/admin/riders`. Search with Enter or Search, filter by vehicle, and select 10, 50 or 100 entries. A profile dialog displays the selected result. The page and result range come from Laravel's paginated response.
+The protected **Riders** page reads `GET /api/v1/admin/riders`. Search with Enter or Search, filter by vehicle or account status, and select 10, 50 or 100 entries. The page and result range come from Laravel's paginated response.
 
 For this feature, read `features/riders.tsx` for the request and screen states, then `components/pagination.tsx` and the shared Modal in `components/ui.tsx`. The existing `lib/auth.ts` session owner verifies the token and cancels stale reads. Focus rechecks keep a verified session visible while the API responds. A failed verification takes the user to the existing retry or sign-in view.
+
+### Suspend and reactivate
+
+Open a rider profile, wait for the current status, then choose Suspend or Reactivate. Enter the reason and confirm. Suspension blocks sign-in and revokes that rider's tokens. Reactivation requires a fresh sign-in. The profile shows the recorded administrator, time and reason in a compact ten-row activity list.
+
+`features/rider-profile.tsx` owns confirmation and activity loading. `lib/riders.ts` validates the profile, page and transition returned by Laravel. A stale revision or uncertain reply refreshes the current profile and directory before another confirmation. The API migration `2026_11_08_130000_add_rider_status_and_activity.php` supplies the status fields and history table.
 
 ## Verification
 
